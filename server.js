@@ -1,26 +1,18 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const sgMail = require('@sendgrid/mail');
 
 const app = express();
-const PORT = process.env.PORT || 10000;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-// Configurazione SendGrid
-if (process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-  console.log('📧 Using SendGrid for emails');
-} else {
-  console.warn('⚠️ SENDGRID_API_KEY not set - email notifications disabled');
-}
-
-// Configurazione Database PostgreSQL
+// ========================================
+// CONFIGURAZIONE DATABASE
+// ========================================
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  host: 'dpg-d2q7fdre5dus73bocfc0-a.frankfurt-postgres.render.com',
+  port: 5432,
+  database: 'datascarpetta',
+  user: 'datauser',
+  password: 'JCQqn4MKA2psf368X3Deox95DAAfV14N',
   ssl: {
     rejectUnauthorized: false
   }
@@ -29,163 +21,244 @@ const pool = new Pool({
 // Test connessione database
 pool.connect((err, client, release) => {
   if (err) {
-    console.error('❌ Error connecting to database:', err.stack);
+    console.error('❌ Errore connessione database:', err);
   } else {
-    console.log('✅ Connected to PostgreSQL database');
+    console.log('✅ Database connesso con successo!');
     release();
   }
 });
 
-// Funzione per inviare email
-async function sendEmail(to, subject, text, html) {
-  if (!process.env.SENDGRID_API_KEY) {
-    console.log('Email not sent - SendGrid not configured');
-    return { success: false, message: 'SendGrid not configured' };
-  }
+// ========================================
+// MIDDLEWARE
+// ========================================
+app.use(cors());
+app.use(express.json());
 
-  const msg = {
-    to: to,
-    from: process.env.SENDGRID_FROM_EMAIL || 'noreply@braceria.com',
-    subject: subject,
-    text: text,
-    html: html,
-  };
-
+// ========================================
+// ENDPOINT 1: GET SLOT DISABILITATI
+// ========================================
+app.get('/gestionale/get-disabled-time-slots/', async (req, res) => {
   try {
-    await sgMail.send(msg);
-    console.log(`✅ Email sent to ${to}`);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending email:', error);
-    return { success: false, error: error.message };
-  }
-}
+    const { date } = req.query;
 
-// Health check
-app.get('/', (req, res) => {
+    if (!date) {
+      return res.status(400).json({ error: 'Data richiesta' });
+    }
+
+    console.log('📅 Richiesta slot disabilitati per:', date);
+
+    // Query per ottenere fasce orarie disabilitate
+    const result = await pool.query(
+      `SELECT start_time, end_time, reason 
+       FROM gestionale_disabledtimeslot 
+       WHERE date = $1 
+       ORDER BY start_time`,
+      [date]
+    );
+
+    // Formatta risposta
+    const disabledSlots = result.rows.map(row => ({
+      start_time: row.start_time,
+      end_time: row.end_time,
+      reason: row.reason
+    }));
+
+    console.log('✅ Slot disabilitati trovati:', disabledSlots.length);
+    res.json({ disabled_time_slots: disabledSlots });
+
+  } catch (error) {
+    console.error('❌ Errore get-disabled-time-slots:', error);
+    res.status(500).json({ error: 'Errore del server' });
+  }
+});
+
+// ========================================
+// ENDPOINT 2: CREA PRENOTAZIONE BRACERIA
+// ========================================
+app.post('/api/braceria/prenota', async (req, res) => {
+  const client = await pool.connect();
+  
+  try {
+    await client.query('BEGIN');
+
+    const {
+      first_name,
+      last_name,
+      phone_number,
+      email,
+      guests,
+      reservation_date,
+      reservation_time,
+      cookie_consent,
+      profiling_consent,
+      promotional_sms_consent,
+      accept_all
+    } = req.body;
+
+    console.log('📝 Nuova prenotazione ricevuta:', {
+      nome: first_name,
+      cognome: last_name,
+      data: reservation_date,
+      ora: reservation_time,
+      persone: guests
+    });
+
+    // ========================================
+    // VALIDAZIONE
+    // ========================================
+    if (!cookie_consent) {
+      console.log('❌ Consenso privacy mancante');
+      return res.status(400).json({ error: 'Consenso privacy obbligatorio' });
+    }
+
+    if (!first_name || !last_name || !phone_number || !email || 
+        !reservation_date || !reservation_time) {
+      console.log('❌ Campi obbligatori mancanti');
+      return res.status(400).json({ error: 'Compila tutti i campi obbligatori' });
+    }
+
+    // ========================================
+    // CONTROLLO DISPONIBILITÀ
+    // ========================================
+    
+    // 1. Controlla se la data è completamente disabilitata
+    console.log('🔍 Controllo disponibilità data...');
+    const dateCheck = await client.query(
+      'SELECT 1 FROM gestionale_disableddate WHERE date = $1',
+      [reservation_date]
+    );
+
+    if (dateCheck.rowCount > 0) {
+      console.log('❌ Data non disponibile');
+      return res.status(400).json({ error: 'Data non disponibile' });
+    }
+
+    // 2. Controlla se l'orario cade in una fascia disabilitata
+    console.log('🔍 Controllo disponibilità orario...');
+    const timeCheck = await client.query(
+      `SELECT 1 FROM gestionale_disabledtimeslot 
+       WHERE date = $1 
+       AND $2::time >= start_time 
+       AND $2::time < end_time`,
+      [reservation_date, reservation_time]
+    );
+
+    if (timeCheck.rowCount > 0) {
+      console.log('❌ Orario non disponibile');
+      return res.status(400).json({ error: 'Orario non disponibile' });
+    }
+
+    console.log('✅ Data e orario disponibili');
+
+    // ========================================
+    // INSERIMENTO PRENOTAZIONE
+    // ========================================
+    console.log('💾 Salvataggio prenotazione nel database...');
+    const insertResult = await client.query(
+      `INSERT INTO gestionale_reservation (
+        restaurant_id, first_name, last_name, phone_number,
+        guests, reservation_date, reservation_time,
+        cookie_consent, profiling_consent, 
+        promotional_sms_consent, accept_all, email
+      ) VALUES (
+        'BRACERIA', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+      ) RETURNING id`,
+      [
+        first_name, last_name, phone_number, guests,
+        reservation_date, reservation_time, cookie_consent,
+        profiling_consent, promotional_sms_consent, 
+        accept_all, email
+      ]
+    );
+
+    const reservationId = insertResult.rows[0].id;
+    console.log('✅ Prenotazione salvata con ID:', reservationId);
+
+    // ========================================
+    // GESTIONE CUSTOMER (se consenso profilazione)
+    // ========================================
+    if (profiling_consent) {
+      console.log('👤 Aggiornamento dati cliente...');
+      await client.query(
+        `INSERT INTO gestionale_customer (
+          first_name, last_name, phone_number, numero_prenotazioni
+        ) VALUES ($1, $2, $3, 1)
+        ON CONFLICT (phone_number) 
+        DO UPDATE SET 
+          first_name = EXCLUDED.first_name,
+          last_name = EXCLUDED.last_name,
+          numero_prenotazioni = gestionale_customer.numero_prenotazioni + 1`,
+        [first_name, last_name, phone_number]
+      );
+      console.log('✅ Dati cliente aggiornati');
+    }
+
+    await client.query('COMMIT');
+    console.log('✅ Transazione completata');
+
+    // ========================================
+    // RISPOSTA SUCCESSO
+    // ========================================
+    res.status(201).json({
+      success: true,
+      id: reservationId,
+      message: 'Prenotazione confermata',
+      data: {
+        reservation_id: reservationId,
+        first_name,
+        last_name,
+        reservation_date,
+        reservation_time,
+        guests
+      }
+    });
+
+    console.log('🎉 Prenotazione completata con successo!');
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('❌ Errore creazione prenotazione:', error);
+    res.status(500).json({ 
+      error: 'Errore durante la prenotazione',
+      details: error.message 
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// ========================================
+// HEALTH CHECK
+// ========================================
+app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
-    message: 'Braceria Booking API',
+    service: 'braceria-backend',
     timestamp: new Date().toISOString()
   });
 });
 
-// GET - Ottieni tutte le prenotazioni
-app.get('/api/prenotazioni', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM prenotazioni ORDER BY data, ora');
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching prenotazioni:', error);
-    res.status(500).json({ error: 'Errore nel recupero delle prenotazioni' });
-  }
+// ========================================
+// ROOT ENDPOINT
+// ========================================
+app.get('/', (req, res) => {
+  res.json({
+    service: 'Backend Prenotazioni Braceria San Frediano',
+    version: '1.0.0',
+    endpoints: {
+      health: 'GET /health',
+      disabledSlots: 'GET /gestionale/get-disabled-time-slots/?date=YYYY-MM-DD',
+      createReservation: 'POST /api/braceria/prenota'
+    }
+  });
 });
 
-// POST - Crea nuova prenotazione
-app.post('/api/prenotazioni', async (req, res) => {
-  const { nome, telefono, email, data, ora, numero_persone, note } = req.body;
-
-  if (!nome || !telefono || !data || !ora || !numero_persone) {
-    return res.status(400).json({ error: 'Campi obbligatori mancanti' });
-  }
-
-  try {
-    const result = await pool.query(
-      'INSERT INTO prenotazioni (nome, telefono, email, data, ora, numero_persone, note) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [nome, telefono, email, data, ora, numero_persone, note]
-    );
-
-    const prenotazione = result.rows[0];
-
-    // Invia email di conferma al cliente
-    if (email && process.env.SENDGRID_API_KEY) {
-      const emailSubject = 'Conferma Prenotazione - Braceria';
-      const emailText = `Ciao ${nome},\n\nLa tua prenotazione è confermata!\n\nDettagli:\nData: ${data}\nOra: ${ora}\nPersone: ${numero_persone}\n\nGrazie per averci scelto!\n\nBraceria`;
-      const emailHtml = `
-        <h2>Conferma Prenotazione</h2>
-        <p>Ciao <strong>${nome}</strong>,</p>
-        <p>La tua prenotazione è confermata!</p>
-        <h3>Dettagli:</h3>
-        <ul>
-          <li><strong>Data:</strong> ${data}</li>
-          <li><strong>Ora:</strong> ${ora}</li>
-          <li><strong>Persone:</strong> ${numero_persone}</li>
-          ${note ? `<li><strong>Note:</strong> ${note}</li>` : ''}
-        </ul>
-        <p>Grazie per averci scelto!</p>
-        <p><em>Braceria</em></p>
-      `;
-      
-      await sendEmail(email, emailSubject, emailText, emailHtml);
-    }
-
-    // Invia email di notifica al ristorante
-    if (process.env.SENDGRID_API_KEY && process.env.RESTAURANT_EMAIL) {
-      const notificationSubject = 'Nuova Prenotazione Ricevuta';
-      const notificationText = `Nuova prenotazione:\n\nNome: ${nome}\nTelefono: ${telefono}\nEmail: ${email || 'Non fornita'}\nData: ${data}\nOra: ${ora}\nPersone: ${numero_persone}\nNote: ${note || 'Nessuna'}`;
-      const notificationHtml = `
-        <h2>Nuova Prenotazione</h2>
-        <ul>
-          <li><strong>Nome:</strong> ${nome}</li>
-          <li><strong>Telefono:</strong> ${telefono}</li>
-          <li><strong>Email:</strong> ${email || 'Non fornita'}</li>
-          <li><strong>Data:</strong> ${data}</li>
-          <li><strong>Ora:</strong> ${ora}</li>
-          <li><strong>Persone:</strong> ${numero_persone}</li>
-          ${note ? `<li><strong>Note:</strong> ${note}</li>` : ''}
-        </ul>
-      `;
-      
-      await sendEmail(process.env.RESTAURANT_EMAIL, notificationSubject, notificationText, notificationHtml);
-    }
-
-    res.status(201).json(prenotazione);
-  } catch (error) {
-    console.error('Error creating prenotazione:', error);
-    res.status(500).json({ error: 'Errore nella creazione della prenotazione' });
-  }
-});
-
-// DELETE - Elimina prenotazione
-app.delete('/api/prenotazioni/:id', async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const result = await pool.query('DELETE FROM prenotazioni WHERE id = $1 RETURNING *', [id]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Prenotazione non trovata' });
-    }
-
-    res.json({ message: 'Prenotazione eliminata', prenotazione: result.rows[0] });
-  } catch (error) {
-    console.error('Error deleting prenotazione:', error);
-    res.status(500).json({ error: 'Errore nell\'eliminazione della prenotazione' });
-  }
-});
-
-// PUT - Aggiorna stato prenotazione
-app.put('/api/prenotazioni/:id', async (req, res) => {
-  const { id } = req.params;
-  const { stato } = req.body;
-
-  try {
-    const result = await pool.query(
-      'UPDATE prenotazioni SET stato = $1 WHERE id = $2 RETURNING *',
-      [stato, id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Prenotazione non trovata' });
-    }
-
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error updating prenotazione:', error);
-    res.status(500).json({ error: 'Errore nell\'aggiornamento della prenotazione' });
-  }
-});
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🔥 Server Braceria running on port ${PORT}`);
+// ========================================
+// START SERVER
+// ========================================
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`\n🔥 ========================================`);
+  console.log(`🔥 Server Braceria attivo su porta ${PORT}`);
+  console.log(`🔥 ========================================\n`);
 });
