@@ -8,7 +8,7 @@ const app = express();
 // ========================================
 // CONFIGURAZIONE SENDGRID
 // ========================================
-sgMail.setApiKey('SG.3_FU_12TTMGtzCICAw2tYg.sVtMU7UAPwO_rKkbO02i3G4W2vC-3VssMX2KSWNMG8w');
+sgMail.setApiKey('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');
 const SENDER_EMAIL = 'braceriasanfrediano@gmail.com';
 
 // ========================================
