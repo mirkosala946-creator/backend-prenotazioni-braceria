@@ -21,35 +21,34 @@
 }
 ```
 
-6. Clicca **"Commit changes"**
-7. Scrivi: `Aggiornato package.json con SendGrid`
-8. Clicca **"Commit changes"** di nuovo
+### 6. **IMPORTANTE**: Dopo aver incollato, verifica:
+- ✅ NON ci devono essere righe vuote in fondo
+- ✅ NON ci devono essere spazi strani
+- ✅ L'ultima riga deve essere solo `}`
+
+### 7. Clicca **"Commit changes"**
+
+### 8. Messaggio: `Fix package.json syntax error`
+
+### 9. Clicca **"Commit changes"** di nuovo
 
 ---
 
-## 🚀 PASSO 2: RENDER FARÀ TUTTO DA SOLO
+## 🚀 Render farà automaticamente il redeploy
 
-### 2.1 - Vai su Render
+Aspetta **2-3 minuti** e guarda i logs su Render.
+
+**Dovresti vedere:**
 ```
-https://dashboard.render.com/
-```
-
-### 2.2 - Trova il tuo servizio
-Cerca: **backend-prenotazioni-braceria**
-
-### 2.3 - **NON FARE NIENTE!**
-Render ha il **"Auto-Deploy"** attivo, quindi:
-- ✅ Vede che hai fatto commit su GitHub
-- ✅ Scarica automaticamente i nuovi file
-- ✅ Installa automaticamente `@sendgrid/mail`
-- ✅ Riavvia il server
-
-### 2.4 - Aspetta 2-3 minuti
-Vedrai nella sezione "Logs":
-```
-==> Installing dependencies...
-==> Building...
-==> Starting server...
+==> Running build command 'yarn'...
+yarn install v1.22.22
+[1/4] Resolving packages...
+[2/4] Fetching packages...
+[3/4] Linking dependencies...
+[4/4] Building fresh packages...
+success Saved lockfile.
+Done in 15.23s.
+==> Starting service...
 ✅ Database connesso con successo!
 📧 Sistema email configurato (SendGrid)
 🔥 Server Braceria attivo su porta 10000
@@ -57,8 +56,6 @@ Vedrai nella sezione "Logs":
 
 ---
 
-## ✅ PASSO 3: VERIFICA CHE FUNZIONI
-
-### 3.1 - Apri il browser e vai su:
+## ✅ Poi verifica:
 ```
 https://backend-prenotazioni-braceria.onrender.com/health
