@@ -1,20 +1,64 @@
 {
   "name": "backend-prenotazioni-braceria",
-  "version": "1.0.0",
-  "description": "Backend per gestione prenotazioni Braceria San Frediano",
+  "version": "2.0.0",
+  "description": "Backend per gestione prenotazioni Braceria San Frediano con email",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "keywords": ["braceria", "prenotazioni", "restaurant"],
-  "author": "",
+  "keywords": ["braceria", "prenotazioni", "restaurant", "sendgrid", "email"],
+  "author": "Tempora Innovation",
   "license": "ISC",
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "pg": "^8.11.3"
+    "pg": "^8.11.3",
+    "@sendgrid/mail": "^7.7.0"
   },
   "engines": {
     "node": ">=18.0.0"
   }
 }
+```
+
+6. Clicca **"Commit changes"**
+7. Scrivi: `Aggiornato package.json con SendGrid`
+8. Clicca **"Commit changes"** di nuovo
+
+---
+
+## 🚀 PASSO 2: RENDER FARÀ TUTTO DA SOLO
+
+### 2.1 - Vai su Render
+```
+https://dashboard.render.com/
+```
+
+### 2.2 - Trova il tuo servizio
+Cerca: **backend-prenotazioni-braceria**
+
+### 2.3 - **NON FARE NIENTE!**
+Render ha il **"Auto-Deploy"** attivo, quindi:
+- ✅ Vede che hai fatto commit su GitHub
+- ✅ Scarica automaticamente i nuovi file
+- ✅ Installa automaticamente `@sendgrid/mail`
+- ✅ Riavvia il server
+
+### 2.4 - Aspetta 2-3 minuti
+Vedrai nella sezione "Logs":
+```
+==> Installing dependencies...
+==> Building...
+==> Starting server...
+✅ Database connesso con successo!
+📧 Sistema email configurato (SendGrid)
+🔥 Server Braceria attivo su porta 10000
+```
+
+---
+
+## ✅ PASSO 3: VERIFICA CHE FUNZIONI
+
+### 3.1 - Apri il browser e vai su:
+```
+https://backend-prenotazioni-braceria.onrender.com/health
