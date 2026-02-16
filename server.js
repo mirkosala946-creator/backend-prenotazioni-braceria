@@ -8,7 +8,7 @@ const app = express();
 // ========================================
 // CONFIGURAZIONE SENDGRID
 // ========================================
-sgMail.setApiKey('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');
+sgMail.setApiKey(process.env.SENDGRID_API_KEY || 'YOUR_SENDGRID_API_KEY_HERE');
 const SENDER_EMAIL = 'braceriasanfrediano@gmail.com';
 
 // ========================================
@@ -424,22 +424,38 @@ app.post('/api/braceria/prenota', async (req, res) => {
     console.log('✅ Prenotazione salvata con ID:', reservationId);
 
     // ========================================
-    // GESTIONE CUSTOMER (se consenso profilazione)
+    // GESTIONE CUSTOMER (se consenso profilazione) - FIX
     // ========================================
     if (profiling_consent) {
       console.log('👤 Aggiornamento dati cliente...');
-      await client.query(
-        `INSERT INTO gestionale_customer (
-          first_name, last_name, phone_number, numero_prenotazioni
-        ) VALUES ($1, $2, $3, 1)
-        ON CONFLICT (phone_number) 
-        DO UPDATE SET 
-          first_name = EXCLUDED.first_name,
-          last_name = EXCLUDED.last_name,
-          numero_prenotazioni = gestionale_customer.numero_prenotazioni + 1`,
-        [first_name, last_name, phone_number]
+      
+      // Verifica se il cliente esiste già
+      const existingCustomer = await client.query(
+        'SELECT id, numero_prenotazioni FROM gestionale_customer WHERE phone_number = $1',
+        [phone_number]
       );
-      console.log('✅ Dati cliente aggiornati');
+      
+      if (existingCustomer.rowCount > 0) {
+        // Cliente esiste: aggiorna
+        await client.query(
+          `UPDATE gestionale_customer 
+           SET first_name = $1, 
+               last_name = $2, 
+               numero_prenotazioni = numero_prenotazioni + 1
+           WHERE phone_number = $3`,
+          [first_name, last_name, phone_number]
+        );
+        console.log('✅ Dati cliente esistente aggiornati');
+      } else {
+        // Cliente nuovo: inserisci
+        await client.query(
+          `INSERT INTO gestionale_customer (
+            first_name, last_name, phone_number, numero_prenotazioni
+          ) VALUES ($1, $2, $3, 1)`,
+          [first_name, last_name, phone_number]
+        );
+        console.log('✅ Nuovo cliente aggiunto al CRM');
+      }
     }
 
     await client.query('COMMIT');
@@ -518,8 +534,8 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     service: 'Backend Prenotazioni Braceria San Frediano',
-    version: '2.0.0',
-    features: ['Database PostgreSQL', 'Email SendGrid', 'API REST'],
+    version: '2.1.0',
+    features: ['Database PostgreSQL', 'Email SendGrid', 'API REST', 'CRM Fix'],
     endpoints: {
       health: 'GET /health',
       disabledSlots: 'GET /gestionale/get-disabled-time-slots/?date=YYYY-MM-DD',
