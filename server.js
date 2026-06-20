@@ -1,15 +1,16 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const sgMail = require('@sendgrid/mail');
 
 const app = express();
 
 // ========================================
-// CONFIGURAZIONE SENDGRID
+// CONFIGURAZIONE BREVO (EMAIL - GRATIS)
 // ========================================
-sgMail.setApiKey(process.env.SENDGRID_API_KEY || 'YOUR_SENDGRID_API_KEY_HERE');
+const BREVO_API_KEY = process.env.BREVO_API_KEY || 'YOUR_BREVO_API_KEY_HERE';
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 const SENDER_EMAIL = 'braceriasanfrediano@gmail.com';
+const SENDER_NAME = 'Braceria San Frediano';
 
 // ========================================
 // CONFIGURAZIONE DATABASE
@@ -242,34 +243,47 @@ function getEmailTemplateRistorante(data) {
   `;
 }
 
+async function inviaEmailBrevo(to, toName, subject, htmlContent) {
+  const response = await fetch(BREVO_API_URL, {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json',
+      'api-key': BREVO_API_KEY,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      sender: { name: SENDER_NAME, email: SENDER_EMAIL },
+      to: [{ email: to, name: toName }],
+      subject: subject,
+      htmlContent: htmlContent
+    })
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody.message || `Brevo API error: ${response.status}`);
+  }
+
+  return response.json();
+}
+
 async function inviaEmailConferma(prenotazione) {
   try {
-    // Email al cliente
-    const emailCliente = {
-      to: prenotazione.email,
-      from: {
-        email: SENDER_EMAIL,
-        name: 'Braceria San Frediano'
-      },
-      subject: `✅ Prenotazione Confermata - ${formatDate(prenotazione.reservation_date)} alle ${prenotazione.reservation_time}`,
-      html: getEmailTemplateCliente(prenotazione)
-    };
-
-    // Email al ristorante
-    const emailRistorante = {
-      to: SENDER_EMAIL,
-      from: {
-        email: SENDER_EMAIL,
-        name: 'Sistema Prenotazioni Braceria'
-      },
-      subject: `📬 Nuova Prenotazione #${prenotazione.reservation_id} - ${prenotazione.first_name} ${prenotazione.last_name}`,
-      html: getEmailTemplateRistorante(prenotazione)
-    };
-
-    // Invio entrambe le email
     await Promise.all([
-      sgMail.send(emailCliente),
-      sgMail.send(emailRistorante)
+      // Email al cliente
+      inviaEmailBrevo(
+        prenotazione.email,
+        `${prenotazione.first_name} ${prenotazione.last_name}`,
+        `✅ Prenotazione Confermata - ${formatDate(prenotazione.reservation_date)} alle ${prenotazione.reservation_time}`,
+        getEmailTemplateCliente(prenotazione)
+      ),
+      // Email al ristorante
+      inviaEmailBrevo(
+        SENDER_EMAIL,
+        SENDER_NAME,
+        `📬 Nuova Prenotazione #${prenotazione.reservation_id} - ${prenotazione.first_name} ${prenotazione.last_name}`,
+        getEmailTemplateRistorante(prenotazione)
+      )
     ]);
 
     console.log('✅ Email inviate con successo:', {
@@ -279,10 +293,7 @@ async function inviaEmailConferma(prenotazione) {
 
     return { success: true };
   } catch (error) {
-    console.error('❌ Errore invio email:', error);
-    if (error.response) {
-      console.error('SendGrid Response:', error.response.body);
-    }
+    console.error('❌ Errore invio email:', error.message);
     return { success: false, error: error.message };
   }
 }
@@ -424,19 +435,17 @@ app.post('/api/braceria/prenota', async (req, res) => {
     console.log('✅ Prenotazione salvata con ID:', reservationId);
 
     // ========================================
-    // GESTIONE CUSTOMER (se consenso profilazione) - FIX
+    // GESTIONE CUSTOMER (se consenso profilazione)
     // ========================================
     if (profiling_consent) {
       console.log('👤 Aggiornamento dati cliente...');
       
-      // Verifica se il cliente esiste già
       const existingCustomer = await client.query(
         'SELECT id, numero_prenotazioni FROM gestionale_customer WHERE phone_number = $1',
         [phone_number]
       );
       
       if (existingCustomer.rowCount > 0) {
-        // Cliente esiste: aggiorna
         await client.query(
           `UPDATE gestionale_customer 
            SET first_name = $1, 
@@ -447,7 +456,6 @@ app.post('/api/braceria/prenota', async (req, res) => {
         );
         console.log('✅ Dati cliente esistente aggiornati');
       } else {
-        // Cliente nuovo: inserisci
         await client.query(
           `INSERT INTO gestionale_customer (
             first_name, last_name, phone_number, numero_prenotazioni
@@ -524,7 +532,7 @@ app.get('/health', (req, res) => {
     status: 'ok', 
     service: 'braceria-backend',
     timestamp: new Date().toISOString(),
-    email_configured: true
+    email_provider: 'brevo'
   });
 });
 
@@ -534,8 +542,8 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     service: 'Backend Prenotazioni Braceria San Frediano',
-    version: '2.1.0',
-    features: ['Database PostgreSQL', 'Email SendGrid', 'API REST', 'CRM Fix'],
+    version: '4.0.0',
+    features: ['Database PostgreSQL', 'Email Brevo', 'API REST'],
     endpoints: {
       health: 'GET /health',
       disabledSlots: 'GET /gestionale/get-disabled-time-slots/?date=YYYY-MM-DD',
@@ -551,6 +559,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n🔥 ========================================`);
   console.log(`🔥 Server Braceria attivo su porta ${PORT}`);
-  console.log(`📧 Sistema email configurato (SendGrid)`);
+  console.log(`📧 Sistema email configurato (Brevo)`);
   console.log(`🔥 ========================================\n`);
 });
