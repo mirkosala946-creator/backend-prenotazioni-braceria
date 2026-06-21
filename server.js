@@ -419,9 +419,9 @@ app.post('/api/braceria/prenota', async (req, res) => {
         restaurant_id, first_name, last_name, phone_number,
         guests, reservation_date, reservation_time,
         cookie_consent, profiling_consent, 
-        promotional_sms_consent, accept_all, email
+        promotional_sms_consent, accept_all, email, consent_date
       ) VALUES (
-        'BRACERIA', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+        'BRACERIA', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()
       ) RETURNING id`,
       [
         first_name, last_name, phone_number, guests,
